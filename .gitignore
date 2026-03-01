@@ -1,4 +1,13 @@
-.vscode/settings.json
+# --- 今回の問題の修正点 ---
+# src/plugins/* <-- この行を削除しました（これでプラグインがアップロードされます）
+
+# --- PlatformIO用 (重要！) ---
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+
+# --- Visual Studio / Visual Micro (元の設定を維持) ---
 *.json
 __vm/*
 *.vcxproj*
@@ -8,6 +17,12 @@ Debug/*
 Release/*
 debug.cfg
 esp32.svd
-src/plugins/*
 debug.svd
 z.*
+
+# --- その他 ---
+.DS_Store
+Thumbs.db
+*.bin
+*.hex
+*.elf
