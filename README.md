@@ -1,6 +1,14 @@
 OnStepX Telescope Controller
 ===========================
 
+# オリジナルのOnStepXを元にK1ボード用に下記の変更を加えています。
+* ドライバをTMC2209
+* RTCをON
+* WifiをON
+* SLEW_RATE_BASE_DESIREDを2.0
+* Websiteプラグイン（日本語版）を組み込み済み
+* ElegantOTAプラグインを組み込み済み
+
 # What is OnStepX?
 OnStepX is the advanced version of the OnStep computerized telescope controller with support for interfacing with/controlling a variety of motor drivers (and so motors) including Step/Dir, ODrive, and Servo (a combination of encoder and DC motor or Stepper motor) types.
 
