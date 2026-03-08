@@ -1,7 +1,7 @@
 OnStepX Telescope Controller
 ===========================
 
-# オリジナルのOnStepXを元にK1ボード用に下記の変更を加えています。
+# オリジナルのOnStepXを元にK1ボード用に下記を変更
 * ドライバをTMC2209
 * RTCをON
 * WifiをON
