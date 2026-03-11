@@ -8,23 +8,22 @@
 #include "../../../lib/tasks/OnTask.h"
 #include "../../../lib/nv/Nv.h"
 
+#include "../../Telescope.h"
 #include "../Mount.h"
 #include "../goto/Goto.h"
 #include "../guide/Guide.h"
+#include "../limits/Limits.h"
 
 // init the home position (according to settings and mount type)
 void Home::init() {
-  // confirm the data structure size
-  if (SettingsSize < sizeof(Settings)) { nv.initError = true; DL("ERR: Home::init(), SettingsSize error"); }
+  nvKey = nv().kv().computeKey("HOME_SETTINGS");
+  if (!nv().kv().getOrInit(nvKey, settings)) { DLF("WRN: Nv, init failed for HOME_SETTINGS"); }
 
-  // write the default settings to NV
-  if (!nv.hasValidKey()) {
-    VLF("MSG: Mount, home writing defaults to NV");
-    nv.writeBytes(NV_MOUNT_HOME_BASE, &settings, sizeof(Settings));
-  }
-
-  // get settings from NV
-  nv.readBytes(NV_MOUNT_HOME_BASE, &settings, sizeof(Settings));
+  settings.automaticAtBoot = constrain(settings.automaticAtBoot, false, true);
+  settings.axis1.senseOffset = constrain(settings.axis1.senseOffset, degToArcsecF(-180), degToArcsecF(180)); 
+  settings.axis1.senseReverse = constrain(settings.axis1.senseReverse, false, true);
+  settings.axis2.senseOffset = constrain(settings.axis2.senseOffset, degToArcsecF(-180), degToArcsecF(180));
+  settings.axis2.senseReverse = constrain(settings.axis2.senseReverse, false, true);
 
   #ifndef AXIS1_HOME_DEFAULT
     if (transform.mountType == GEM) position.h = Deg90; else { position.h = 0.0L; position.z = 0.0L; position.aa1 = 0.0L; }
@@ -32,6 +31,7 @@ void Home::init() {
     if (transform.mountType == ALTAZM) position.z = degToRad(AXIS1_HOME_DEFAULT); else
     if (transform.mountType == ALTALT) position.aa1 = degToRad(AXIS1_HOME_DEFAULT); else position.h = degToRad(AXIS1_HOME_DEFAULT);
   #endif
+
   #ifndef AXIS2_HOME_DEFAULT
     if (transform.mountType == ALTAZM) position.a = 0.0; else
     if (transform.mountType == ALTALT) position.aa2 = 0.0; else position.d = site.locationEx.latitude.sign*Deg90;
@@ -135,7 +135,12 @@ void Home::guideDone(bool success) {
 
   #if AXIS1_SECTOR_GEAR == OFF && AXIS2_TANGENT_ARM == OFF
     if (useOffset()) {
-      reset(isRequestWithReset);
+      CommandError e = reset(isRequestWithReset, true);
+      if (e != CE_NONE) {
+        state = HS_NONE;
+        DF("WRN: Home::guideDone(), reset after sensed home failed (code "); D(e); DLF(")");
+        return;
+      }
 
       #if MOUNT_HOME_AT_OFFSETS == OFF
         VF("MSG: Mount, finishing move to home with goto to (");
@@ -152,7 +157,12 @@ void Home::guideDone(bool success) {
       state = HS_NONE;
     } else {
       state = HS_NONE;
-      reset(isRequestWithReset);
+      CommandError e = reset(isRequestWithReset, true);
+      if (e != CE_NONE) {
+        DF("WRN: Home::guideDone(), reset after sensed home failed (code "); D(e); DLF(")");
+      } else {
+        mount.syncFromOnStepToEncoders = true;
+      }
     }
   #else
     state = HS_NONE;
@@ -161,7 +171,7 @@ void Home::guideDone(bool success) {
       VLF("MSG: Mount, sector gear set origin");
       double h = axis1.getInstrumentCoordinate();
       if (axis1.resetPosition(0.0L) != 0) { DLF("WRN: Home::guideDone(), failed to resetPosition Axis1"); exit; }
-      axis1.setInstrumentCoordinate(h);
+      if (limits.setInstrumentCoordinate(1, h, true) != CE_NONE) { DLF("WRN: Home::guideDone(), failed to setInstrumentCoordinate Axis1"); exit; }
       mount.tracking(wasTracking);
     #endif
 
@@ -169,7 +179,7 @@ void Home::guideDone(bool success) {
       VLF("MSG: Mount, tangent arm set origin");
       double d = axis2.getInstrumentCoordinate();
       if (axis2.resetPosition(0.0L) != 0) { DLF("WRN: Home::guideDone(), failed to resetPosition Axis2"); exit; }
-      axis2.setInstrumentCoordinate(d);
+      if (limits.setInstrumentCoordinate(2, d, true) != CE_NONE) { DLF("WRN: Home::guideDone(), failed to setInstrumentCoordinate Axis2"); exit; }
     #endif
   #endif
 }
@@ -181,7 +191,7 @@ void Home::requestDone() {
 }
 
 // reset mount at home
-CommandError Home::reset(bool fullReset) {
+CommandError Home::reset(bool fullReset, bool authoritative) {
   #if GOTO_FEATURE == ON
     if (goTo.state != GS_NONE) {
       axis1.autoSlewAbort();
@@ -209,9 +219,6 @@ CommandError Home::reset(bool fullReset) {
   Coordinate homePosition = getPosition(CR_MOUNT);
 
   if (!goTo.absoluteEncodersPresent) {
-    if (axis1.resetPosition(0.0L) != 0) { DLF("WRN: Home::reset(), failed to resetPosition Axis1"); }
-    if (axis2.resetPosition(0.0L) != 0) { DLF("WRN: Home::reset(), failed to resetPosition Axis2"); }
-
     #if MOUNT_HOME_AT_OFFSETS == OFF
       if (useOffset() && state == HS_HOMING && !fullReset) {
         homePosition.a1 += arcsecToRad(site.locationEx.latitude.sign*settings.axis1.senseOffset);
@@ -219,8 +226,31 @@ CommandError Home::reset(bool fullReset) {
       }
     #endif
 
-    axis1.setInstrumentCoordinate(homePosition.a1);
-    axis2.setInstrumentCoordinate(homePosition.a2);
+    CommandError e = limits.validateInstrumentCoordinate(1, homePosition.a1, authoritative);
+    if (e == CE_NONE) e = limits.validateInstrumentCoordinate(2, homePosition.a2, authoritative);
+    if (e != CE_NONE) {
+      DLF("WRN: Home::reset(), coordinate reset rejected by sync threshold");
+      if (fullReset) mount.enable(MOUNT_ENABLE_IN_STANDBY == ON);
+      return CE_SLEW_ERR_OUTSIDE_LIMITS;
+    }
+
+    if (axis1.resetPosition(0.0L) != 0) {
+      DLF("WRN: Home::reset(), failed to resetPosition Axis1");
+      if (fullReset) mount.enable(MOUNT_ENABLE_IN_STANDBY == ON);
+      return CE_SLEW_IN_MOTION;
+    }
+    if (axis2.resetPosition(0.0L) != 0) {
+      DLF("WRN: Home::reset(), failed to resetPosition Axis2");
+      if (fullReset) mount.enable(MOUNT_ENABLE_IN_STANDBY == ON);
+      return CE_SLEW_IN_MOTION;
+    }
+
+    e = limits.setInstrumentCoordinate(1, homePosition.a1, true);
+    if (e == CE_NONE) e = limits.setInstrumentCoordinate(2, homePosition.a2, true);
+    if (e != CE_NONE) {
+      if (fullReset) mount.enable(MOUNT_ENABLE_IN_STANDBY == ON);
+      return e;
+    }
   }
 
   axis1.setBacklash(mount.settings.backlash.axis1);

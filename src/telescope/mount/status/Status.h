@@ -12,6 +12,10 @@
 #define SF_STOPPED 0
 #define SF_SLEWING 1
 
+typedef struct StatusSettings {
+ bool soundEnabled;
+} StatusSettings;
+
 class Status {
   public:
     // get mount status ready
@@ -21,6 +25,9 @@ class Status {
     void wake();
 
     bool command(char *reply, char *command, char *parameter, bool *suppressFrame, bool *numericReply, CommandError *commandError);
+
+    // current mount fault/status code for external reporting
+    uint8_t errorCode();
 
     // mount status LED flash rate (in ms)
     void flashRate(int period);
@@ -36,6 +43,7 @@ class Status {
   private:
     uint8_t statusTaskHandle = 0;
     Sound sound;
+    StatusSettings settings = {false};
 };
 
 extern Status mountStatus;

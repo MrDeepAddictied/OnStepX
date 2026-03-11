@@ -24,15 +24,15 @@
 
 #pragma pack(1)
 typedef struct AltitudeLimits {
-  float min;
-  float max;
+  float min; // in radians
+  float max; // in radians
 } AltitudeLimits;
 
 #define LimitSettingsSize 16
 typedef struct LimitSettings {
   AltitudeLimits altitude;
-  float pastMeridianE;
-  float pastMeridianW;
+  float pastMeridianE; // in radians
+  float pastMeridianW; // in radians
 } LimitSettings;
 #pragma pack()
 
@@ -64,12 +64,13 @@ class Limits {
 
     bool command(char *reply, char *command, char *parameter, bool *suppressFrame, bool *numericReply, CommandError *commandError);
 
-    // constrain meridian limits to the allowed range
-    void constrainMeridianLimits();
-
     // target coordinate check ahead of sync, goto, etc.
     CommandError validateTarget(Coordinate *coords, bool isGoto);
     CommandError validateTarget(Coordinate *coords, bool *eastReachable, bool *westReachable, double *eastCorrection, double *westCorrection, bool isGoto);
+
+    // validate and apply an instrument coordinate change for a mount axis
+    CommandError validateInstrumentCoordinate(uint8_t axisNumber, double value, bool bypass = false);
+    CommandError setInstrumentCoordinate(uint8_t axisNumber, double value, bool bypass = false);
 
     // true if an limit related error is exists
     bool isError();
@@ -116,6 +117,8 @@ class Limits {
     LimitsError error;
 
     int limitsDisablePeriodDs = 0; // in deciseconds (0.1s)
+
+    uint32_t nvKey;
 };
 
 extern Limits limits;

@@ -17,43 +17,18 @@
 inline void limitsWrapper() { limits.poll(); }
 
 void Limits::init() {
-  // confirm the data structure size
-  if (LimitSettingsSize < sizeof(LimitSettings)) { nv.initError = true; DL("ERR: Limits::init(), LimitSettingsSize error"); }
 
-  // write the default settings to NV
-  if (!nv.hasValidKey() || nv.isNull(NV_MOUNT_LIMITS_BASE, sizeof(LimitSettings))) {
-    VLF("MSG: Mount, limits writing defaults to NV");
-    nv.writeBytes(NV_MOUNT_LIMITS_BASE, &settings, sizeof(LimitSettings));
-  }
+  nvKey = nv().kv().computeKey("LIMIT_SETTINGS");
+  if (!nv().kv().getOrInit(nvKey, settings)) { DLF("WRN: Nv, init failed for LIMIT_SETTINGS"); }
 
-  // get settings from NV
-  nv.readBytes(NV_MOUNT_LIMITS_BASE, &settings, sizeof(LimitSettings));
-
-  constrainMeridianLimits();
+  settings.altitude.min = constrain(settings.altitude.min, degToRadF(-30), degToRadF(30));
+  settings.altitude.max = constrain(settings.altitude.max, degToRadF(60), degToRadF(90));
+  settings.pastMeridianE = constrain(settings.pastMeridianE, degToRadF(-360), degToRadF(360));
+  settings.pastMeridianW = constrain(settings.pastMeridianW, degToRadF(-360), degToRadF(360));
 
   // start limit monitor task
   VF("MSG: Mount, start limits monitor task (rate 100ms priority 2)... ");
   if (tasks.add(100, 0, true, 2, limitsWrapper, "MtLimit")) { VLF("success"); } else { VLF("FAILED!"); }
-}
-
-// constrain meridian limits to the allowed range
-void Limits::constrainMeridianLimits() {
-  if (settings.pastMeridianE > Deg360) {
-    settings.pastMeridianE = Deg360;
-    DLF("WRN: Limits::init(), pastMeridianE > 360 deg setting to 360 deg");
-  }
-  if (settings.pastMeridianE < -Deg360) {
-    settings.pastMeridianE = -Deg360;
-    DLF("WRN: Limits::init(), pastMeridianE < -360 deg setting to -360 deg");
-  }
-  if (settings.pastMeridianW > Deg360) {
-    settings.pastMeridianW = Deg360;
-    DLF("WRN: Limits::init(), pastMeridianW > 360 deg setting to 360 deg");
-  }
-  if (settings.pastMeridianW < -Deg360) {
-    settings.pastMeridianW = -Deg360;
-    DLF("WRN: Limits::init(), pastMeridianW < -360 deg setting to -360 deg");
-  }
 }
 
 // target coordinate check ahead of sync, goto, etc.
@@ -61,6 +36,70 @@ CommandError Limits::validateTarget(Coordinate *coords, bool isGoto) {
   bool eastReachable, westReachable;
   double eastCorrection, westCorrection;
   return validateTarget(coords, &eastReachable, &westReachable, &eastCorrection, &westCorrection, isGoto);
+}
+
+CommandError Limits::validateInstrumentCoordinate(uint8_t axisNumber, double value, bool bypass) {
+  if (bypass) return CE_NONE;
+  if (!limitsEnabled) return CE_NONE;
+
+  #if AXIS1_WRAP == ON
+    return CE_NONE;
+  #else
+    #if AXIS1_SECTOR_GEAR == ON || AXIS2_TANGENT_ARM == ON
+      return CE_NONE;
+    #endif
+
+    double current;
+    double threshold;
+    const char *axisLabel;
+
+    switch (axisNumber) {
+      case 1:
+        current = axis1.getInstrumentCoordinate();
+        threshold = (AXIS1_SYNC_THRESHOLD == OFF) ? OFF : degToRadF((float)AXIS1_SYNC_THRESHOLD);
+        axisLabel = "axis1";
+      break;
+      case 2:
+        current = axis2.getInstrumentCoordinate();
+        threshold = (AXIS2_SYNC_THRESHOLD == OFF) ? OFF : degToRadF((float)AXIS2_SYNC_THRESHOLD);
+        axisLabel = "axis2";
+      break;
+      default:
+        return CE_PARAM_RANGE;
+    }
+
+    if (threshold == OFF) return CE_NONE;
+
+    const double delta = fabs(value - current);
+    if (delta > threshold) {
+      VF("MSG: Mount, ");
+      V(axisLabel);
+      VF(" instrument coordinate update rejected, delta ");
+      V(radToDeg(delta));
+      VLF(" deg");
+      return CE_SLEW_ERR_OUTSIDE_LIMITS;
+    }
+
+    return CE_NONE;
+  #endif
+}
+
+CommandError Limits::setInstrumentCoordinate(uint8_t axisNumber, double value, bool bypass) {
+  CommandError e = validateInstrumentCoordinate(axisNumber, value, bypass);
+  if (e != CE_NONE) return e;
+
+  switch (axisNumber) {
+    case 1:
+      axis1.setInstrumentCoordinate(value);
+    break;
+    case 2:
+      axis2.setInstrumentCoordinate(value);
+    break;
+    default:
+      return CE_PARAM_RANGE;
+  }
+
+  return CE_NONE;
 }
 
 // target coordinate check ahead of sync, goto, etc.
