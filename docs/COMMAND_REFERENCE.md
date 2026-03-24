@@ -220,7 +220,7 @@ Available when `MOUNT_PRESENT` is enabled.
 | `:SX41,n#` | `0/1` | Stage encoder axis2 angle in degrees |
 | `:SX42,1#` | `0/1` | Sync mount from staged encoder axis values |
 | `:SX43,0#` | `0/1` | Allow SWS to control sync mode |
-| `:SX44,deg1,deg2#` | `0/1` | Stage and sync both encoder axes |
+| `:SX44,deg1,deg2[a]#` | `0/1` | Stage and sync both encoder axes, append `a` when both SWS encoder values are absolute and trusted |
 | `:SXEM,n#` | `0/1` | Set mount type for next restart |
 | `:SXTD,n.n#` | `0/1` | Set Dec tracking rate offset, arcsec per sidereal second |
 | `:SXTR,n.n#` | `0/1` | Set RA tracking rate offset, arcsec per sidereal second |
@@ -417,6 +417,9 @@ Current core constants are:
 | `:hF#` | none | Reset mount at home/cold-start position |
 
 ### Limits
+
+For a visual explanation of confusing GEM east/west pier-side limit geometry,
+see [GOTO_NOTES.md](GOTO_NOTES.md#workflow-4-reachability-and-target-unwinding).
 
 | Command | Reply | Description |
 | --- | --- | --- |
@@ -817,6 +820,9 @@ Locale-backed axis parameter name tokens currently used by firmware:
 | `$26` | Max power, % |
 
 ## CAN Remote-Node Variants
+
+For architecture, configuration, and current scope, see
+[CAN_NOTES.md](CAN_NOTES.md).
 
 The following files implement the same logical command families over packed CAN messages rather than the ASCII LX200-style transport:
 
